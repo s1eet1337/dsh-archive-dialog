@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "declaration": false,
+    "declarationDir": null,
+    "outDir": "lib/.client-stage",
+    "types": [],
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": false,
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src/client"],
+  "exclude": []
+}

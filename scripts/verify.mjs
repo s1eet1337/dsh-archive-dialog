@@ -133,9 +133,9 @@ check('deleteSession：真实文件往返 + 安全校验', async () => {
     const dir = join(sessionsRoot, projectKey('C:\\fake\\ws'), encodeSegment('session-a'))
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, 'session.jsonl'), '{"type":"session/title"}\n')
-    const cacheDir = join(cacheRoot, encodeSegment('session-a'))
-    mkdirSync(cacheDir, { recursive: true })
-    writeFileSync(join(cacheDir, 'x.bin'), 'x')
+    mkdirSync(cacheRoot, { recursive: true })
+    const cacheFile = join(cacheRoot, encodeSegment('session-a') + '.json')
+    writeFileSync(cacheFile, '{}')
 
     const result = await deleteSession(
       { registry, persistence, liveSessions: { get: () => undefined }, sessionsRoot, projectCacheRoot: cacheRoot },
@@ -144,7 +144,7 @@ check('deleteSession：真实文件往返 + 安全校验', async () => {
     assert.equal(result.deleted, true)
     assert.equal(result.filesDeleted, true)
     assert.equal(existsSync(dir), false)
-    assert.equal(existsSync(cacheDir), false)
+    assert.equal(existsSync(cacheFile), false)
     assert.deepEqual(registry.archivedSessionIds, [])
     assert.equal(registry._entities[0].record.sessionIds.includes('session-a'), false)
 
@@ -169,6 +169,18 @@ check('deleteSession：真实文件往返 + 安全校验', async () => {
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }
+})
+
+check('deleteSession：数据已丢失时仍清理残留归档 ID（不报「未找到会话」）', async () => {
+  const registry = fakeRegistry(['session-gone'])
+  const persistence = fakePersistence([])
+  const result = await deleteSession(
+    { registry, persistence, liveSessions: { get: () => undefined }, sessionsRoot: 'X:\none', projectCacheRoot: 'X:\none' },
+    'session-gone',
+  )
+  assert.equal(result.deleted, true)
+  assert.equal(result.filesDeleted, false)
+  assert.deepEqual(registry.archivedSessionIds, [])
 })
 
 if (failures > 0) {

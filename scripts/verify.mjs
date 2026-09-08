@@ -183,6 +183,21 @@ check('deleteSession：数据已丢失时仍清理残留归档 ID（不报「未
   assert.deepEqual(registry.archivedSessionIds, [])
 })
 
+check('deleteSession：日志存在但目录定位失败 → 拒绝删除且保持归档（不变成未分组）', async () => {
+  const registry = fakeRegistry(['session-missing'])
+  const persistence = fakePersistence([{ id: 'session-missing', cwd: 'C:\\fake\\ws' }])
+  // sessionsRoot 里没有对应目录（模拟定位失败），header 却存在
+  await assert.rejects(
+    deleteSession(
+      { registry, persistence, liveSessions: { get: () => undefined }, sessionsRoot: 'X:\none', projectCacheRoot: 'X:\none' },
+      'session-missing',
+    ),
+    /未找到会话日志目录/,
+  )
+  // 关键回归：文件删除失败时不得先动归档记账，会话保持归档，不会变成未分组
+  assert.deepEqual(registry.archivedSessionIds, ['session-missing'])
+})
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`)
   process.exit(1)

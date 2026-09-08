@@ -53,6 +53,13 @@ interface HeaderFields {
   updatedAt?: string
 }
 
+/** Normalize a persisted header timestamp (epoch-ms number or ISO string) to ISO. */
+function toIso(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString()
+  return undefined
+}
+
 function headerFields(header: SessionHeaderLike | undefined): HeaderFields | undefined {
   if (header === undefined) return undefined
   const id = String(header.id ?? header.sessionId ?? '')
@@ -61,8 +68,8 @@ function headerFields(header: SessionHeaderLike | undefined): HeaderFields | und
     id,
     cwd: typeof header.cwd === 'string' ? header.cwd : undefined,
     title: typeof header.title === 'string' && header.title.trim() !== '' ? header.title : undefined,
-    createdAt: typeof header.createdAt === 'string' ? header.createdAt : undefined,
-    updatedAt: typeof header.updatedAt === 'string' ? header.updatedAt : undefined,
+    createdAt: toIso(header.createdAt),
+    updatedAt: toIso(header.updatedAt),
   }
 }
 
@@ -146,10 +153,12 @@ export interface DeleteDeps {
 /**
  * 彻底删除一个会话：
  *   1. 拒绝删除正在打开/运行的会话；
- *   2. 从归档集合移除（幂等）；
- *   3. 从所属工作区记账移除（先于文件删除，保证注册表校验一致）；
- *   4. 删除会话日志目录（安全检查：目录里必须存在 session.jsonl(.zstd)）；
- *   5. 清理投影缓存（失败不致命）。
+ *   2. 先删除会话日志目录（安全检查：目录里必须存在 session.jsonl(.zstd)）。
+ *      此时会话仍在归档集合里（对 UI 隐藏），这一步失败会抛错且尚未动注册表，
+ *      因此会话保持归档状态，绝不会被漏成「未分组」孤儿；
+ *   3. 清理投影缓存（失败不致命）；
+ *   4. 文件已删除后再清注册表：取消归档 + 移出工作区记账（幂等）。此时
+ *      domain/changed 触发前端刷新，而会话日志已不存在，列表自然不再显示它。
  */
 export async function deleteSession(deps: DeleteDeps, sessionId: string): Promise<DeleteResult> {
   const live = deps.liveSessions?.get?.(sessionId)
@@ -159,42 +168,30 @@ export async function deleteSession(deps: DeleteDeps, sessionId: string): Promis
 
   const headers = await deps.persistence.list()
   const header = headers.find((h) => String(h.id ?? h.sessionId ?? '') === sessionId)
-  // header 缺失 = 会话日志早已不存在（例如之前已被外部清理）。此时仍要完成取消
-  // 归档 + 移出工作区记账 + 清理缓存，把残留归档 ID 清掉；否则脏条目会永远卡在
-  // 归档列表里，且每次删除都报「未找到会话」。
+  // header 缺失 = 会话日志早已不存在（例如之前已被外部清理）。此时跳过文件删除，
+  // 但仍要完成取消归档 + 移出工作区记账 + 清理缓存，把残留归档 ID 清掉。
   const fields = header === undefined ? undefined : headerFields(header)
   const cwd = fields?.cwd !== undefined && fields.cwd.trim() !== '' ? fields.cwd : undefined
 
-  // 1. 取消归档（幂等）
-  await restoreSession(deps.registry, sessionId)
-
-  // 2. 移出工作区记账
-  let detachedWorkspaceId: string | null = null
-  for (const w of deps.registry.list()) {
-    const accounted = (w.record?.sessionIds ?? []).some((id) => String(id) === sessionId)
-    if (!accounted) continue
-    if (typeof w.detachSession !== 'function') throw new Error('当前版本不支持从工作区移除会话（detachSession 缺失）')
-    await w.detachSession(sessionId)
-    detachedWorkspaceId = String(w.id)
-  }
-
-  // 3. 删除会话日志文件（header 缺失时跳过——日志本就不存在，也无法定位其目录）
+  // 1. 先删文件：会话此刻仍在归档集合里（对 UI 隐藏）。这一步失败会抛错，
+  //    且尚未动注册表，所以会话保持归档状态，不会变成「未分组」。
   let filesDeleted = false
   if (header !== undefined) {
     const projectDir = cwd === undefined ? '_no-cwd' : projectKey(cwd)
     const sessionDir = join(deps.sessionsRoot, projectDir, encodeSegment(sessionId))
-    if (existsSync(sessionDir)) {
-      const names = readdirSync(sessionDir)
-      const hasLog = names.some((n) => n === 'session.jsonl' || n === 'session.jsonl.zstd')
-      if (!hasLog) {
-        throw new Error(`安全校验未通过：目录 ${sessionDir} 中未找到会话日志文件，拒绝删除`)
-      }
-      await rm(sessionDir, { recursive: true, force: true })
-      filesDeleted = true
+    if (!existsSync(sessionDir)) {
+      throw new Error(`未找到会话日志目录 ${sessionDir}：会话日志仍存在但目录定位失败，拒绝删除`)
     }
+    const names = readdirSync(sessionDir)
+    const hasLog = names.some((n) => n === 'session.jsonl' || n === 'session.jsonl.zstd')
+    if (!hasLog) {
+      throw new Error(`安全校验未通过：目录 ${sessionDir} 中未找到会话日志文件，拒绝删除`)
+    }
+    await rm(sessionDir, { recursive: true, force: true })
+    filesDeleted = true
   }
 
-  // 4. 清理投影缓存（per-record 文档：<cacheRoot>/<sessionId>.json；失败不致命）
+  // 2. 清理投影缓存（per-record 文档：<cacheRoot>/<sessionId>.json；失败不致命）
   const cacheFile = join(deps.projectCacheRoot, `${encodeSegment(sessionId)}.json`)
   if (existsSync(cacheFile)) {
     try {
@@ -202,6 +199,19 @@ export async function deleteSession(deps: DeleteDeps, sessionId: string): Promis
     } catch {
       // 缓存清理失败不影响删除结果
     }
+  }
+
+  // 3. 文件已删除后再清注册表（取消归档 + 移出工作区记账），前端在 domain/changed
+  //    刷新时列表里已无该会话日志，自然消失，而不是显示成未分组。
+  await restoreSession(deps.registry, sessionId)
+
+  let detachedWorkspaceId: string | null = null
+  for (const w of deps.registry.list()) {
+    const accounted = (w.record?.sessionIds ?? []).some((id) => String(id) === sessionId)
+    if (!accounted) continue
+    if (typeof w.detachSession !== 'function') throw new Error('当前版本不支持从工作区移除会话（detachSession 缺失）')
+    await w.detachSession(sessionId)
+    detachedWorkspaceId = String(w.id)
   }
 
   return { deleted: true, filesDeleted, detachedWorkspaceId }

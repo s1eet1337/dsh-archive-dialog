@@ -31,9 +31,11 @@ export interface DeleteDeps {
 /**
  * 彻底删除一个会话：
  *   1. 拒绝删除正在打开/运行的会话；
- *   2. 从归档集合移除（幂等）；
- *   3. 从所属工作区记账移除（先于文件删除，保证注册表校验一致）；
- *   4. 删除会话日志目录（安全检查：目录里必须存在 session.jsonl(.zstd)）；
- *   5. 清理投影缓存（失败不致命）。
+ *   2. 先删除会话日志目录（安全检查：目录里必须存在 session.jsonl(.zstd)）。
+ *      此时会话仍在归档集合里（对 UI 隐藏），这一步失败会抛错且尚未动注册表，
+ *      因此会话保持归档状态，绝不会被漏成「未分组」孤儿；
+ *   3. 清理投影缓存（失败不致命）；
+ *   4. 文件已删除后再清注册表：取消归档 + 移出工作区记账（幂等）。此时
+ *      domain/changed 触发前端刷新，而会话日志已不存在，列表自然不再显示它。
  */
 export declare function deleteSession(deps: DeleteDeps, sessionId: string): Promise<DeleteResult>;

@@ -1,0 +1,41 @@
+{
+  "name": "preset-copy-team",
+  "id": "preset-copy-team",
+  "description": "Team to copy standard preset to custom",
+  "captainSessionId": "session-43410a67-1517-4ae1-8b66-ffe1570608a9",
+  "createdAt": 1788886414520,
+  "members": [
+    {
+      "id": "d5b8e663-1f74-45db-96c7-a0ba5afec593",
+      "name": "engineer",
+      "role": "engineer",
+      "provider": "llama-cpp-qwen3-14b",
+      "model": "Qwen3-14B-abliterated-Q4_K_M.gguf",
+      "joinedAt": 1788886426733,
+      "status": "idle"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "subject": "Copy standard preset to custom",
+      "description": "Copy the standard preset to a new custom preset with id 'custom'",
+      "status": "completed",
+      "assignee": "engineer",
+      "dependencies": [],
+      "attempt": 1,
+      "createdAt": 1788886440126,
+      "updatedAt": 1788886939670,
+      "kind": "work",
+      "attemptId": "3e3cad66-efd4-4293-a4cf-5846631503c5",
+      "reassigning": false,
+      "output": "C:\\Users\\sjyhz\\Desktop\\归档对话选择\\preset.example",
+      "changedPaths": [
+        "preset.example"
+      ]
+    }
+  ],
+  "taskSeq": 1,
+  "phase": "running",
+  "approvedAt": 1788886672154
+}

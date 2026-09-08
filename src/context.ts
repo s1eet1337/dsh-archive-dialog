@@ -48,6 +48,35 @@ export interface LiveSessionLike {
 
 export interface SessionStoreLike {
   get(id: string): LiveSessionLike | undefined | null
+  /**
+   * The store's durability checkpoint (`SessionStore.flush`) — drains the
+   * write-behind queue of ONE live session so its log is complete before we
+   * delete the files. Optional on the face: hosts that predate it skip the
+   * flush (deletion still proceeds, with a small resurrection risk).
+   */
+  flush?(session: LiveSessionLike): Promise<boolean>
+}
+
+/**
+ * Minimal face of a live agent loop (`ReactLoopAgent`). Official DSH derives
+ * a row's “running” state from here — `status === 'running'` — NOT from mere
+ * presence in `ctx.sessions`. An idle agent (phase `idle`) is resident but is
+ * not executing anything.
+ */
+export interface AgentPhaseLike {
+  kind?: unknown
+}
+
+export interface AgentLike {
+  status?: unknown
+  phase?: AgentPhaseLike
+  /** Clear queued work without starting a turn (public on ReactLoopAgent). */
+  cancel?(cause?: unknown, options?: { keepInbox?: boolean }): unknown
+}
+
+/** Live agent registry (`ctx.agents`), keyed by session id. */
+export interface AgentRegistryLike {
+  get(id: string): AgentLike | undefined
 }
 
 /**

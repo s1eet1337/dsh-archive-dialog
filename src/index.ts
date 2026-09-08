@@ -12,10 +12,11 @@
  *
  * `/api/*` 由桌面端自带控制器保留，插件一律挂 `/plugins/<name>`（生态约定）。
  */
-import { deleteSession, listArchived, restoreSession } from './host/archive.ts'
+import { deleteSession, listArchived, purgeStaleArchived, restoreSession } from './host/archive.ts'
 import { projectionCacheRoot, resolveDshHome, sessionsRoot } from './host/paths.ts'
 import { isTrustedApiRequest, readJsonBody, writeJson } from './host/wire.ts'
 import type {
+  AgentRegistryLike,
   HostContext,
   RouteRequest,
   RouteResponse,
@@ -34,6 +35,16 @@ export const inject: string[] = ['webServer']
 
 const API_PREFIX = '/plugins/dsh-archive-dialog'
 const SESSION_ID_PATTERN = /^session-[A-Za-z0-9-]+$/
+
+/** ctx 上没有声明 logger 面，仅做尽力而为的告警输出。 */
+const logWarn = (ctx: HostContext, message: string, err: unknown): void => {
+  try {
+    const logger = (ctx as { logger?: { warn?(...args: unknown[]): void } }).logger
+    if (logger !== undefined && typeof logger.warn === 'function') logger.warn(message, err)
+  } catch {
+    // 忽略日志失败
+  }
+}
 
 export function apply(ctx: HostContext): void {
   const readWeb = (): WebServerLike | undefined => (ctx.get('webServer') ?? ctx.get('httpServer')) as WebServerLike | undefined
@@ -64,6 +75,17 @@ export function apply(ctx: HostContext): void {
     const pathname = url.pathname
 
     if (pathname === `${API_PREFIX}/archived` && req.method === 'GET') {
+      // 先顺手清理「墓碑」（归档集合里日志已不存在且没有活动会话的残留 id）。
+      // 失败不阻断列表。
+      try {
+        await purgeStaleArchived({
+          registry: requireRegistry(),
+          persistence: requirePersistence(),
+          sessions: readSessions(),
+        })
+      } catch (err) {
+        logWarn(ctx, 'dsh-archive-dialog: 墓碑清理失败', err)
+      }
       const rows = await listArchived(requireRegistry(), readPersistence(), readSessions())
       writeJson(res, 200, { ok: true, data: { rows } }, { 'cache-control': 'no-store' })
       return
@@ -83,12 +105,23 @@ export function apply(ctx: HostContext): void {
         {
           registry: requireRegistry(),
           persistence: requirePersistence(),
-          liveSessions: readSessions(),
+          sessions: readSessions(),
+          agents: ctx.get('agents') as AgentRegistryLike | undefined,
           sessionsRoot: sessionsRoot(home),
           projectCacheRoot: projectionCacheRoot(home),
         },
         sessionId,
       )
+      // 删除成功后顺带清理墓碑（包括刚删掉的、未驻留的会话的归档 id）。
+      try {
+        await purgeStaleArchived({
+          registry: requireRegistry(),
+          persistence: requirePersistence(),
+          sessions: readSessions(),
+        })
+      } catch (err) {
+        logWarn(ctx, 'dsh-archive-dialog: 墓碑清理失败', err)
+      }
       writeJson(res, 200, { ok: true, data: result }, { 'cache-control': 'no-store' })
       return
     }

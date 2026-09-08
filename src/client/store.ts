@@ -107,6 +107,31 @@ function showNotice(kind: Notice['kind'], text: string): void {
 }
 
 /* ------------------------------------------------------------------ *
+ * DSH 官方会话列表刷新钩子
+ *
+ * 删除/恢复会改磁盘与注册表，但 DSH 侧栏的会话列表（含「未分组」）只在自己
+ * 重新拉取时才更新。删除成功后主动触发官方 `sessions.refresh()`，该 RPC 会在
+ * host 端把搜索索引与磁盘对账，并让侧栏立即丢掉已删除的行（否则要重启才消失，
+ * 期间会以「未分组」幽灵形式残留）。由 index.tsx 在 apply 时注入；拿不到
+ * 服务时静默降级。
+ * ------------------------------------------------------------------ */
+
+type SessionListRefresher = () => void
+let sessionListRefresher: SessionListRefresher | undefined
+
+export function setSessionListRefresher(fn: SessionListRefresher | undefined): void {
+  sessionListRefresher = fn
+}
+
+function notifySessionListChanged(): void {
+  try {
+    sessionListRefresher?.()
+  } catch (err) {
+    console.warn('[dsh-archive-dialog] session list refresh failed:', err)
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * 动作：恢复 / 彻底删除
  * ------------------------------------------------------------------ */
 
@@ -117,6 +142,7 @@ export async function restore(sessionId: string): Promise<void> {
   if (res.ok) {
     showNotice('success', '已恢复，该对话已回到工作区列表')
     await refresh()
+    notifySessionListChanged()
   } else {
     showNotice('error', `恢复失败：${res.error}`)
   }
@@ -132,6 +158,7 @@ export async function remove(sessionId: string): Promise<void> {
   if (res.ok) {
     showNotice('success', '已彻底删除，该对话无法恢复')
     await refresh()
+    notifySessionListChanged()
   } else {
     showNotice('error', `删除失败：${res.error}`)
   }

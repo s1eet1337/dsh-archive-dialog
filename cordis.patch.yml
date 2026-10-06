@@ -1,0 +1,10 @@
+# dsh-archive-dialog bundle patch layer.
+#
+# 一行插件同时挂载两半：
+#   - host 半：从包入口 `lib/index.js` 解析，注册 /plugins/dsh-archive-dialog 路由
+#     （列出已归档对话 / 恢复 / 彻底删除）；
+#   - client 半：DSH 的 client-modules 扫描带 `dsh.client` 声明的包，
+#     把 `./client` bundle 注入浏览器（左侧栏按钮 + 悬浮面板）。
+- insert:
+    - id: dsh-archive-dialog
+      name: 'dsh-archive-dialog'
